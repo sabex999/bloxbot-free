@@ -77,12 +77,12 @@ return function()
  connect(workspace:GetPropertyChangedSignal('CurrentCamera'),bindCamera);bindCamera()
  local function label(text,y,height,size,color)return create('TextLabel',{Position=UDim2.fromOffset(18,y),Size=UDim2.new(1,-36,0,height),BackgroundTransparency=1,Text=text,Font=Enum.Font.Gotham,TextSize=size,TextColor3=color or Color3.fromRGB(232,232,237),TextXAlignment=Enum.TextXAlignment.Left,TextWrapped=true},panel)end
  label('BB   Bloxbot',12,28,17);label('FREE',43,18,10,Color3.fromRGB(72,151,255))
- local close=create('TextButton',{Position=UDim2.new(1,-46,0,2),Size=UDim2.fromOffset(44,44),Text='Ã—',TextSize=23,Font=Enum.Font.Gotham,TextColor3=Color3.fromRGB(137,139,152),BackgroundTransparency=1},panel)
+ local close=create('TextButton',{Position=UDim2.new(1,-46,0,2),Size=UDim2.fromOffset(44,44),Text='×',TextSize=23,Font=Enum.Font.Gotham,TextColor3=Color3.fromRGB(137,139,152),BackgroundTransparency=1},panel)
  local function button(text,y,color)local b=create('TextButton',{Position=UDim2.fromOffset(18,y),Size=UDim2.new(1,-36,0,44),BackgroundColor3=color or Color3.fromRGB(72,151,255),BorderSizePixel=0,Text=text,TextSize=13,Font=Enum.Font.GothamMedium,TextColor3=Color3.new(1,1,1)},panel);create('UICorner',{CornerRadius=UDim.new(0,8)},b);return b end
  local copy=button('Get key with Panda',72)
  local key=create('TextBox',{Position=UDim2.fromOffset(18,126),Size=UDim2.new(1,-36,0,44),Text='',PlaceholderText='PANDA-XXXX-XXXX-XXXX-XXXX',ClearTextOnFocus=false,TextSize=12,Font=Enum.Font.Code,TextColor3=Color3.fromRGB(232,232,237),PlaceholderColor3=Color3.fromRGB(137,139,152),BackgroundColor3=Color3.fromRGB(35,35,40),BorderSizePixel=0},panel);create('UICorner',{CornerRadius=UDim.new(0,8)},key)
  local enter=button('Unlock',180)
- local status=label('Connecting to Pandaâ€¦',233,42,11,Color3.fromRGB(137,139,152))
+ local status=label('Connecting to Panda…',233,42,11,Color3.fromRGB(137,139,152))
  local public={}
  function public.destroy()
   if not alive then return end;alive=false
@@ -100,7 +100,7 @@ return function()
  local function runtime()
   local path='BloxBotFreeCache-v1/runtime-'..config.sha256..'.enc64'
   if type(readfile)=='function'then local ok,value=pcall(readfile,path);if ok and type(value)=='string'and #value==config.bytes and transport.hash(value)==config.sha256 then return value end end
-  message('Downloading updateâ€¦');local value=fetch(config.url)
+  message('Downloading update…');local value=fetch(config.url)
   assert(#value==config.bytes and transport.hash(value)==config.sha256,'Update verification failed. Please retry.')
   if type(writefile)=='function'then if type(makefolder)=='function'then pcall(makefolder,'BloxBotFreeCache-v1')end;pcall(writefile,path,value)end
   return value
@@ -112,7 +112,7 @@ return function()
   if copied then message('Link copied. Complete Panda, then paste your key.')else key.Text=link;key:CaptureFocus();message('Copy the link above, then paste your Panda key here.')end
  end)
  connect(enter.Activated,function()
-  if busy or not sdk then return end;busy=true;enter.Text='Checkingâ€¦';message('Checking Panda keyâ€¦')
+  if busy or not sdk then return end;busy=true;enter.Text='Checking…';message('Checking Panda key…')
   local userKey=key.Text:match('^%s*(.-)%s*$')or''
   task.spawn(function()
    local ok,result=pcall(function()
@@ -155,5 +155,5 @@ return function()
 end
 
 end
-factories.ReleaseConfig=function()return {["sha256"]="d8ad472cab79629dddd1b388c314124f6fb80d0b8e64ef4845d74ff1ee8cc379",["bytes"]=4653976,["plain_bytes"]=3490467,["plain_sha256"]="640b0ed861c1c72c6a722995a363704b76f77e4f9522ff61fee46b8d28c3da7f",["url"]="https://raw.githubusercontent.com/sabakilledu/bloxbot-free/main/releases/r9-d8ad472cab79629d.enc64",["gateway"]="https://bloxbot-free-catalog.bloxbot.workers.dev"} end
+factories.ReleaseConfig=function()return {["sha256"]="dee44fba63a8536b1de140f320c5d7e8e08354367852e981739cac7feb3fa7dd",["bytes"]=4653888,["plain_bytes"]=3490409,["plain_sha256"]="d84f6162137a58b2cd241ec752138bb762c9128b4c525e8624e5f35f86a470a2",["url"]="https://raw.githubusercontent.com/sabakilledu/bloxbot-free/main/releases/r9-dee44fba63a8536b.enc64",["gateway"]="https://bloxbot-free-catalog.bloxbot.workers.dev"} end
 return import("GitHubMain")()
