@@ -55,7 +55,7 @@ return function()
  local http=game:GetService('HttpService');local input=game:GetService('UserInputService');local guiService=game:GetService('GuiService')
  local transport=Compat.get();local alive,busy,transferred=true,false,false;local sdk=nil;local connections={}
  local function fetch(url,method,body)
-  local reply=transport.fetch({Url=url,Method=method or 'GET',Headers={Accept='application/json',['Content-Type']='application/json'},Body=body,Timeout=20})
+  local reply=transport.fetch({Url=url,Method=method or 'GET',Headers={Accept='application/json',['Content-Type']='application/json',['User-Agent']='Bloxbot/1.0',['Cache-Control']='no-cache'},Body=body,Timeout=20})
   assert(reply.StatusCode==200,'Connection interrupted. Please try again.');return reply.Body
  end
  local function create(kind,properties,parent)local n=Instance.new(kind);for k,v in pairs(properties)do n[k]=v end;n.Parent=parent;return n end
