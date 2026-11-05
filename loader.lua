@@ -155,5 +155,5 @@ return function()
 end
 
 end
-factories.ReleaseConfig=function()return {["sha256"]="71d75814378f0fb8d37ab0d77178a69fc7b2c2e112900d65cef4ac4408fcc8f3",["bytes"]=4665324,["plain_bytes"]=3498982,["plain_sha256"]="56e842bea009fb0fcf57e89fa46f1677562c21e33ac22788d2f02ac9006e8538",["url"]="https://raw.githubusercontent.com/sabex999/bloxbot-free/main/releases/r10-71d75814378f0fb8.enc64",["gateway"]="https://bloxbot-free-catalog.bloxbot.workers.dev"} end
+factories.ReleaseConfig=function()return {["sha256"]="d9b56b727fb2a413c8bc4cd3f3dbabe6faaf2998a57c39ff68a23e3302935884",["bytes"]=4665644,["plain_bytes"]=3499229,["plain_sha256"]="f2ad5d005b0e873d1589c48bf68ffac57586d3f3fa0a606196f906fe7b338354",["url"]="https://raw.githubusercontent.com/sabex999/bloxbot-free/main/releases/r10-d9b56b727fb2a413.enc64",["gateway"]="https://bloxbot-free-catalog.bloxbot.workers.dev"} end
 return import("GitHubMain")()
