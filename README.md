@@ -1,7 +1,7 @@
 # Bloxbot Free
 
 ```lua
-loadstring(game:HttpGet("https://raw.githubusercontent.com/sabex999/bloxbot-free/main/loader.lua?v="..os.time()))()
+loadstring(game:HttpGet("https://raw.githubusercontent.com/sabex999/bloxbot-free/refs/heads/main/loader.lua?v="..os.time()))()
 ```
 
 Use **Get key with Panda**, finish Work.ink or LootLabs, and paste your Panda key.
