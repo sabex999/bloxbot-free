@@ -316,5 +316,5 @@ return function()
 end
 
 end
-factories.ReleaseConfig=function()return {["sha256"]="69d62b514db42b52d42a7141946566159e12b0cdf842c68556fb95033d6be1c2",["bytes"]=4735000,["plain_bytes"]=3551235,["plain_sha256"]="e89e34a05d3946f24129cb22ae33eb686933907900ba639fe7d9c2d10a3fcc95",["url"]="https://raw.githubusercontent.com/sabex999/bloxbot-free/main/releases/r18-69d62b514db42b52.enc64",["gateway"]="https://bloxbot-free-catalog.bloxbot.workers.dev",["loader_url"]="https://raw.githubusercontent.com/sabex999/bloxbot-free/refs/heads/main/loader.lua"} end
+factories.ReleaseConfig=function()return {["sha256"]="60df2b30a214151fb2770afe0f94cfb5757b6f40ae6f510d36bd409cb3e5af27",["bytes"]=4739244,["plain_bytes"]=3554426,["plain_sha256"]="b46ed50fb010d9b81e23b75a4e69edc8683a0af49687b730f3646ed2275865bd",["url"]="https://raw.githubusercontent.com/sabex999/bloxbot-free/main/releases/r19-60df2b30a214151f.enc64",["gateway"]="https://bloxbot-free-catalog.bloxbot.workers.dev",["loader_url"]="https://raw.githubusercontent.com/sabex999/bloxbot-free/refs/heads/main/loader.lua"} end
 return import("GitHubMain")()
