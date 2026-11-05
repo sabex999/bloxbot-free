@@ -34,7 +34,7 @@ function Compat.get()
   assert(type(status)=='number'and type(body)=='string','Executor HTTP response format differs')
   return {StatusCode=status,Body=body,Headers=response.Headers or response.headers}
  end
- checked={hash=hash,decrypt=decrypt,fetch=normalizedFetch}
+ checked={hash=hash,decrypt=decrypt,fetch=normalizedFetch,encrypt=type(crypto.encrypt)=='function'and function(raw,key,iv)return crypto.encrypt(raw,key,iv,mode)end or nil}
  return checked
 end
 function Compat.mobile()
@@ -44,16 +44,123 @@ end
 return Compat
 
 end
+factories.ServerSession=function()
+-- Short server-verified leases survive a broken executor SDK heartbeat.
+-- Every renewal rechecks Panda's key, HWID, expiry, service and blacklist.
+local Session={};Session.__index=Session
+local function finite(n)return type(n)=='number'and n==n and math.abs(n)<math.huge end
+function Session.new(options)
+ local self=setmetatable({options=options,clock=options.clock or os.clock,deadline=0,renewAt=0,alive=true,busy=false,epoch=0,failures=0,reason='Checking Panda…'},Session)
+ -- The SDK-facing surface uses dot calls, matching Panda's standalone API.
+ self.isConnected=function()self:poll();return self.alive and self.clock()<self.deadline end
+ self.isExpired=function()return not self.alive or self.clock()>=self.deadline end
+ self.getTimeLeft=function()return math.max(0,math.ceil(self.deadline-self.clock()))end
+ self.getSessionMessage=function()return self.reason end
+ self.disconnect=function()self:close()end
+ if options.heartbeat then self.connection=options.heartbeat:Connect(function()self:poll()end)end
+ return self
+end
+function Session:accept(key,grant,started)
+ assert(self.alive and type(key)=='string','Session is closed')
+ local lease,renew=grant.lease_seconds,grant.renew_after_seconds
+ assert(finite(lease)and lease>0 and lease<=90 and finite(renew)and renew>0 and renew<=30 and renew<lease,'Panda lease response differs')
+ assert(finite(started)and started<=self.clock()and started+lease>self.clock(),'Panda reply took too long. Retry.')
+ self.key=key;self.deadline=started+lease;self.renewAt=started+renew;self.failures=0;self.reason='Panda connected'
+end
+function Session:poll()
+ if not self.alive or not self.key or self.busy or self.clock()<self.renewAt then return end
+ self.busy=true;local epoch=self.epoch;local key=self.key
+ local spawn=self.options.spawn or task.spawn
+ spawn(function()
+  local began=self.clock();local ok,status,grant=pcall(self.options.renew,key)
+  if not self.alive or epoch~=self.epoch then return end
+  self.busy=false
+  if ok and status==200 then
+   local accepted=pcall(function()self:accept(key,grant,began)end)
+   if accepted then return end
+  elseif ok and(status==403 or status==409)then
+   self.deadline=0;self.key=nil
+   self.reason=status==409 and 'Update available. Run the loader again.'or 'Key expired or revoked. Get a new Panda key.'
+   if status==403 and self.options.onRejected then pcall(self.options.onRejected)end
+   return
+  end
+  self.failures+=1;self.renewAt=self.clock()+math.min(20,2^math.min(4,self.failures))
+  self.reason=self.clock()<self.deadline and 'Panda reconnecting…'or 'Connection interrupted. Reconnecting to Panda…'
+ end)
+end
+function Session:close()
+ if not self.alive then return end
+ self.alive=false;self.epoch+=1;self.key=nil;self.deadline=0;self.reason='Session closed'
+ if self.connection then self.connection:Disconnect();self.connection=nil end
+ for _,connection in ipairs(self.owned or {})do connection:Disconnect()end;self.owned={}
+end
+function Session:own(connection)self.owned=self.owned or {};self.owned[#self.owned+1]=connection end
+return Session
+
+end
+factories.SavedKey=function()
+-- Convenience storage bound to the executor's device ID. Local device access
+-- can recover it; the server always checks the saved key again before access.
+local Saved={};Saved.__index=Saved
+local PATH='BloxBotFreeCache-v1/key-v1.json'
+local alphabet='ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
+local function b64(raw)
+ local result={}
+ for i=1,#raw,3 do
+  local a,b,c=string.byte(raw,i,i+2);local n=a*65536+(b or 0)*256+(c or 0)
+  result[#result+1]=alphabet:sub(math.floor(n/262144)+1,math.floor(n/262144)+1)..alphabet:sub(math.floor(n/4096)%64+1,math.floor(n/4096)%64+1)..(b and alphabet:sub(math.floor(n/64)%64+1,math.floor(n/64)%64+1)or '=')..(c and alphabet:sub(n%64+1,n%64+1)or '=')
+ end
+ return table.concat(result)
+end
+local function valid(key)return type(key)=='string'and key:match('^PANDA%-%w%w%w%w%-%w%w%w%w%-%w%w%w%w%-%w%w%w%w$')~=nil end
+local models={['mechanoid']=true,['wolvot-v3']=true,['ripple-v1-0']=true,['ripple-v1-1']=true}
+local function resumeState(value)
+ if type(value)~='table'or not models[value.id]or(value.game~='Turbo Soccer'and value.game~='Blox League')or value.autoQueue~=true or type(value.skipReplay)~='boolean'then return nil end
+ return {id=value.id,game=value.game,autoQueue=true,skipReplay=value.skipReplay}
+end
+function Saved.new(transport,hwid,api)
+ api=api or {read=readfile,write=writefile,folder=makefolder,remove=delfile,http=game:GetService('HttpService')}
+ return setmetatable({api=api,transport=transport,key=b64(transport.hash('BloxBot saved key v1:'..hwid):sub(1,32))},Saved)
+end
+function Saved:read()
+ if type(self.api.read)~='function'then return nil end
+ local ok,value=pcall(function()
+  local text=self.api.read(PATH);assert(type(text)=='string'and #text<=1024)
+  local row=self.api.http:JSONDecode(text);assert(row.version==1 and type(row.cipher)=='string'and #row.cipher<=256 and type(row.iv)=='string'and #row.iv==24)
+  assert(self.transport.hash(row.iv..row.cipher)==row.sha256)
+  local key=self.transport.decrypt(row.cipher,self.key,row.iv);assert(valid(key));return {key=key,resume=resumeState(row.resume)}
+ end)
+ if ok then return value.key,value.resume end
+ return nil
+end
+function Saved:write(key,resume)
+ if not valid(key)or type(self.api.write)~='function'or type(self.transport.encrypt)~='function'then return false end
+ return pcall(function()
+  if type(self.api.folder)=='function'then pcall(self.api.folder,'BloxBotFreeCache-v1')end
+  local guid=self.api.http:GenerateGUID(false):gsub('-','');assert(#guid==32)
+  local iv=b64((guid:gsub('..',function(pair)return string.char(tonumber(pair,16))end)))
+  local cipher=self.transport.encrypt(key,self.key,iv);assert(type(cipher)=='string'and #cipher<=256 and self.transport.decrypt(cipher,self.key,iv)==key)
+  local row={version=1,cipher=cipher,iv=iv,sha256=self.transport.hash(iv..cipher),resume=resumeState(resume)}
+  assert(self.api.write(PATH,self.api.http:JSONEncode(row))~=false)
+ end)
+end
+function Saved:prepareTeleport(resume)local key=self:read();if key then return self:write(key,resume)end;return false end
+function Saved:clear()if type(self.api.remove)=='function'then pcall(self.api.remove,PATH)end end
+return Saved
+
+end
 factories.GitHubMain=function()
 -- Public bootstrap. Panda handles keys; the catalog stays behind server checks.
 local Compat=import("ExecutorCompat")
+local ServerSession=import("ServerSession")
+local SavedKey=import("SavedKey")
 local config=import("ReleaseConfig")
 return function()
  local env=type(getgenv)=='function'and getgenv()or _G
- for _,name in ipairs({'BloxBotFreeLuau','BloxBotFreeLogin'})do local previous=env[name];if type(previous)=='table'and type(previous.destroy)=='function'then pcall(previous.destroy)end end
+ for _,name in ipairs({'BloxBotFreeLuau','BloxBotFreeLogin'})do local previous=env[name];if type(previous)=='table'and type(previous.destroy)=='function'then pcall(previous.destroy,true)end end
  local player=game:GetService('Players').LocalPlayer;assert(player,'Join a game before running Bloxbot')
  local http=game:GetService('HttpService');local input=game:GetService('UserInputService');local guiService=game:GetService('GuiService')
- local transport=Compat.get();local alive,busy,transferred=true,false,false;local sdk=nil;local connections={}
+ local transport=Compat.get();local alive,busy,transferred=true,false,false;local sdk,session,saved,hwid=nil,nil,nil,nil;local connections={}
  local function fetch(url,method,body)
   local reply=transport.fetch({Url=url,Method=method or 'GET',Headers={Accept='application/json',['Content-Type']='application/json',['User-Agent']='Bloxbot/1.0',['Cache-Control']='no-cache'},Body=body,Timeout=20})
   assert(reply.StatusCode==200,'Connection interrupted. Please try again.');return reply.Body
@@ -87,15 +194,19 @@ return function()
  function public.destroy()
   if not alive then return end;alive=false
   for _,c in ipairs(connections)do c:Disconnect()end;if cameraConnection then cameraConnection:Disconnect()end
-  gui:Destroy();if not transferred and sdk and type(sdk.disconnect)=='function'then pcall(sdk.disconnect)end
+  gui:Destroy();if not transferred then
+   if session then session:close()end;if sdk and type(sdk.disconnect)=='function'then pcall(sdk.disconnect)end
+   local retained=env.BloxBotFreePreparedModel;env.BloxBotFreePreparedModel=nil
+   if type(retained)=='table'and type(retained.model)=='table'and type(retained.model.dispose)=='function'then pcall(retained.model.dispose,retained.model)end
+  end
   if env.BloxBotFreeLogin==public then env.BloxBotFreeLogin=nil end
  end
  env.BloxBotFreeLogin=public;connect(close.Activated,public.destroy)
  local function message(text)if alive then status.Text=text end end
- local function catalog(userKey)
-  local hwid=sdk.hwid();assert(type(hwid)=='string'and #hwid>=8,'Panda device identity is unavailable')
-  local data=http:JSONDecode(fetch(config.gateway..'/v1/catalog','POST',http:JSONEncode({key=userKey,hwid=hwid,release=config.sha256})))
-  assert(type(data)=='table'and type(data.catalog)=='table'and type(data.code)=='table','Panda verification needs a retry');return data
+ local function grant(path,userKey)
+  local started=os.clock()
+  local reply=transport.fetch({Url=config.gateway..path,Method='POST',Headers={Accept='application/json',['Content-Type']='application/json',['User-Agent']='Bloxbot/1.0',['Cache-Control']='no-cache'},Body=http:JSONEncode({key=userKey,hwid=hwid,release=config.sha256}),Timeout=20})
+  local data=http:JSONDecode(reply.Body);return reply.StatusCode,data,started
  end
  local function runtime()
   local path='BloxBotFreeCache-v1/runtime-'..config.sha256..'.enc64'
@@ -111,28 +222,54 @@ return function()
   local copied=false;if type(setclipboard)=='function'then copied=pcall(setclipboard,link)end
   if copied then message('Link copied. Complete Panda, then paste your key.')else key.Text=link;key:CaptureFocus();message('Copy the link above, then paste your Panda key here.')end
  end)
- connect(enter.Activated,function()
-  if busy or not sdk then return end;busy=true;enter.Text='Checking…';message('Checking Panda key…')
-  local userKey=key.Text:match('^%s*(.-)%s*$')or''
+ local function unlock(userKey,automatic,resume)
+  if busy or not sdk then return end;busy=true;enter.Text='Checking…';message(automatic and 'Signing in with your saved key…'or 'Checking Panda key…')
+  userKey=userKey:match('^%s*(.-)%s*$')or''
   task.spawn(function()
    local ok,result=pcall(function()
     assert(userKey:match('^PANDA%-%w%w%w%w%-%w%w%w%w%-%w%w%w%w%-%w%w%w%w$'),'Paste your Panda key exactly as shown')
-    local result=sdk.validate(userKey)
-    if type(result)~='table'or result.success~=true then
-     local reason=type(result)=='table'and result.reason
-     error(reason=='INVALID_KEY'and'Key expired or bound to another device. Get a key from this menu.'or'Panda is busy. Please retry shortly.',0)
+    -- Already-bound keys can use the independent server check immediately.
+    -- New keys still pass Panda's SDK handshake to establish their HWID.
+    local status,authorization,started=grant('/v1/catalog',userKey)
+    if status==403 then
+     local result=sdk.validate(userKey)
+     if type(result)~='table'or result.success~=true then
+      local reason=type(result)=='table'and result.reason
+      if reason=='INVALID_KEY'then saved:clear()end
+      error(reason=='INVALID_KEY'and'Key expired or bound to another device. Get a key from this menu.'or'Panda is busy. Please retry shortly.',0)
+     end
+     status,authorization,started=grant('/v1/catalog',userKey)
     end
-    assert(alive,'Closed');local grant=catalog(userKey);userKey='';if alive then key.Text=''end
-    local encrypted=runtime();local code=transport.decrypt(encrypted,grant.code.key,grant.code.iv)
+    if status==403 then saved:clear()end
+    assert(status==200,status==409 and 'Update available. Run the loader again.'or status==403 and 'Key expired or bound to another device. Get a key from this menu.'or 'Panda connection interrupted. Please retry.')
+    assert(type(authorization)=='table'and type(authorization.catalog)=='table'and type(authorization.code)=='table','Panda verification needs a retry')
+    assert(alive,'Closed');session:accept(userKey,authorization,started);saved:write(userKey);userKey='';if alive then key.Text=''end
+    -- Runtime access now uses fresh server leases, not the mobile SDK heartbeat.
+    pcall(sdk.disconnect)
+    local encrypted=runtime();local code=transport.decrypt(encrypted,authorization.code.key,authorization.code.iv)
     assert(type(code)=='string'and #code==config.plain_bytes and transport.hash(code)==config.plain_sha256,'Update decryption failed. Please retry.')
-    assert(alive and sdk.isConnected()==true,'Panda session ended. Please retry.')
+    assert(alive and session.isConnected()==true,'Panda is reconnecting. Please retry.')
     local chunk,problem=loadstring(code,'BloxBotFreeRuntime');assert(chunk,problem)
     local start=chunk();assert(type(start)=='function','Update format differs')
     transferred=true;public.destroy()
-    local launchOk,menu=pcall(start,{sdk=sdk,catalog=grant.catalog})
-    if not launchOk then transferred=false;pcall(sdk.disconnect);error(menu,0)end
+    local launchOk,menu=pcall(start,{sdk=session,catalog=authorization.catalog,resume=resume})
+    if not launchOk then transferred=false;session:close();error(menu,0)end
     local destroy=menu.destroy;local closed=false
-    menu.destroy=function()if closed then return end;closed=true;destroy();pcall(sdk.disconnect)end
+    menu.destroy=function(preserve)if closed then return end;closed=true;destroy(preserve==true);session:close();pcall(sdk.disconnect)end
+    local queue=queue_on_teleport or queue_on_tp or queueonteleport or queueontp
+    if type(queue)=='function'and player.OnTeleport then
+     local queued=false
+     session:own(player.OnTeleport:Connect(function(state)
+      if queued or state~=Enum.TeleportState.Started or not session.isConnected()then return end
+      queued=true
+      if type(menu.snapshot)=='function'then
+       local ok,state=pcall(menu.snapshot)
+       if ok and type(state)=='table'and state.bot and state.bot.wanted and state.preferences and state.preferences.autoQueue then saved:prepareTeleport({id=state.model,game=state.game,autoQueue=true,skipReplay=state.preferences.skipReplay==true})end
+      end
+      local line='if not game:IsLoaded() then game.Loaded:Wait() end loadstring(game:HttpGet('..string.format('%q',config.loader_url..'?v=')..'..os.time()))()'
+      pcall(queue,line)
+     end))
+    end
     return menu
    end)
    userKey='';busy=false
@@ -140,7 +277,8 @@ return function()
    if alive then enter.Text='Unlock';if not ok then message(tostring(result):gsub('^.-:%d+: ',''))end end
    if not ok and not alive and transferred then warn('Bloxbot: '..tostring(result))end
   end)
- end)
+ end
+ connect(enter.Activated,function()unlock(key.Text,false)end)
  task.spawn(function()
   local ok,value=pcall(function()
    local code=fetch('https://secure.pandauth.com/pv4/lib');assert(#code<4*1024*1024,'Panda response differs')
@@ -149,11 +287,21 @@ return function()
    library.configure({serviceId='bloxbotfreelootlabs',debug=false,kickOnDetect=false});return library
   end)
   if not alive then if ok and type(value.disconnect)=='function'then pcall(value.disconnect)end;return end
-  if ok then sdk=value;message('Get your key with Panda, then paste it above.')else message('Panda connection interrupted. Run the loader again.')end
+  if ok then
+   sdk=value
+   local prepared=pcall(function()
+    hwid=sdk.hwid();assert(type(hwid)=='string'and #hwid>=8,'Device identity unavailable')
+    saved=SavedKey.new(transport,hwid)
+    session=ServerSession.new({heartbeat=game:GetService('RunService').Heartbeat,renew=function(userKey)local status,data=grant('/v1/session',userKey);return status,data end,onRejected=function()saved:clear()end})
+   end)
+   if not prepared then message('Panda device identity is unavailable. Update your executor.');return end
+   local remembered,resume=saved:read()
+   if remembered then unlock(remembered,true,resume)else message('Get your key with Panda, then paste it above.')end
+  else message('Panda connection interrupted. Run the loader again.')end
  end)
  return public
 end
 
 end
-factories.ReleaseConfig=function()return {["sha256"]="c6961d6c30b5a7060bbd72ac3a8510cbbe0f1d51bfc596fc850b53c32322b05f",["bytes"]=4665816,["plain_bytes"]=3499356,["plain_sha256"]="70bbc905606a65d29bba38401e904076fba0fd260ba1be8d25e4c47cdc17f829",["url"]="https://raw.githubusercontent.com/sabex999/bloxbot-free/main/releases/r10-c6961d6c30b5a706.enc64",["gateway"]="https://bloxbot-free-catalog.bloxbot.workers.dev"} end
+factories.ReleaseConfig=function()return {["sha256"]="19d6f59221dbaedd7064420e1e79459af03e80d50c91577a859895ab026a8abb",["bytes"]=4677144,["plain_bytes"]=3507853,["plain_sha256"]="33c7fccd6afb1a326ed7655985851982c8fed3159fe775d70b912fefe89eb8df",["url"]="https://raw.githubusercontent.com/sabex999/bloxbot-free/main/releases/r11-19d6f59221dbaedd.enc64",["gateway"]="https://bloxbot-free-catalog.bloxbot.workers.dev",["loader_url"]="https://raw.githubusercontent.com/sabex999/bloxbot-free/refs/heads/main/loader.lua"} end
 return import("GitHubMain")()

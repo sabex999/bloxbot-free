@@ -4,8 +4,9 @@
 loadstring(game:HttpGet("https://raw.githubusercontent.com/sabex999/bloxbot-free/refs/heads/main/loader.lua?v="..os.time()))()
 ```
 
-Use **Get key with Panda**, finish Work.ink or LootLabs, and paste your Panda key.
-Script updates come from GitHub. Panda still verifies keys and keeps the session alive.
+Use **Get key with Panda**, finish Work.ink or LootLabs, and paste your Panda key once.
+Valid keys are remembered on the same executor/device when encrypted file storage is available.
+Script updates come from GitHub. Short server leases recheck Panda independently of mobile SDK heartbeat failures.
 Runtime and model downloads are encrypted and reused from local cache when the executor supports files.
 No API credentials, model decryption catalog, or plaintext gameplay payload is in this repository.
 
