@@ -6,12 +6,25 @@ local Compat={};local checked=nil
 function Compat.get()
  if checked then return checked end
  local crypto=crypt or (syn and syn.crypt)
- assert(type(crypto)=='table'and type(crypto.decrypt)=='function'and type(crypto.hash)=='function','This executor needs AES-CBC and SHA-256 support')
+ assert(type(crypto)=='table'and type(crypto.decrypt)=='function','This executor needs AES-CBC support')
  assert(type(buffer)=='table'and type(buffer.create)=='function'and type(buffer.readf32)=='function','Update your executor to a build with Luau buffer support')
- local function hash(raw)
-  local digest=crypto.hash(raw,'sha256');assert(type(digest)=='string','Executor SHA-256 returned invalid data')
+ local function normalize(digest)
+  assert(type(digest)=='string','SHA-256 returned invalid data')
   if #digest==32 then digest=(digest:gsub('.',function(c)return string.format('%02x',string.byte(c))end))end
   digest=digest:lower();assert(#digest==64 and digest:match('^[a-f0-9]+$'),'Executor SHA-256 returned invalid data');return digest
+ end
+ local nativeHash=nil;local hashPath='executor-sha256'
+ local nativeOk,candidate=pcall(function()
+  local encoding=game:GetService('EncodingService');local algorithm=Enum.HashAlgorithm.Sha256
+  local fn=function(raw)return normalize(encoding:ComputeStringHash(raw,algorithm))end
+  assert(fn('abc')=='ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad','Engine SHA-256 differs')
+  assert(fn('')=='e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855','Engine empty SHA-256 differs')
+  return fn
+ end)
+ if nativeOk then nativeHash=candidate;hashPath='engine-sha256'end
+ local function hash(raw)
+  if nativeHash then local ok,digest=pcall(nativeHash,raw);if ok then return digest end;nativeHash=nil;hashPath='executor-sha256';if checked then checked.hash_path=hashPath end end
+  assert(type(crypto.hash)=='function','This executor needs SHA-256 support');return normalize(crypto.hash(raw,'sha256'))
  end
  assert(hash('abc')=='ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad','Executor SHA-256 implementation differs')
  -- Verify a public AES-256-CBC known answer before selecting a mode. Some
@@ -34,7 +47,7 @@ function Compat.get()
   assert(type(status)=='number'and type(body)=='string','Executor HTTP response format differs')
   return {StatusCode=status,Body=body,Headers=response.Headers or response.headers}
  end
- checked={hash=hash,decrypt=decrypt,fetch=normalizedFetch,encrypt=type(crypto.encrypt)=='function'and function(raw,key,iv)return crypto.encrypt(raw,key,iv,mode)end or nil}
+ checked={hash=hash,hash_path=hashPath,decrypt=decrypt,fetch=normalizedFetch,encrypt=type(crypto.encrypt)=='function'and function(raw,key,iv)return crypto.encrypt(raw,key,iv,mode)end or nil}
  return checked
 end
 function Compat.mobile()
@@ -303,5 +316,5 @@ return function()
 end
 
 end
-factories.ReleaseConfig=function()return {["sha256"]="4be86257effb4aedf317874c23b54bc166adc22940446e5fafe20ef4b8b9078b",["bytes"]=4708416,["plain_bytes"]=3531308,["plain_sha256"]="20eadee9ddef15d46d7516958c7af6f5ece4f179a6216a5cced1ad9c818a619d",["url"]="https://raw.githubusercontent.com/sabex999/bloxbot-free/main/releases/r15-4be86257effb4aed.enc64",["gateway"]="https://bloxbot-free-catalog.bloxbot.workers.dev",["loader_url"]="https://raw.githubusercontent.com/sabex999/bloxbot-free/refs/heads/main/loader.lua"} end
+factories.ReleaseConfig=function()return {["sha256"]="79de06a687e57c24729c47f88b6e408f2469790da3fdbabefa097217efa43b00",["bytes"]=4724440,["plain_bytes"]=3543316,["plain_sha256"]="4c0fa45aa992dbfb82989e0734803666f5c007439ac4a0bcbbbbd21deffad973",["url"]="https://raw.githubusercontent.com/sabex999/bloxbot-free/main/releases/r16-79de06a687e57c24.enc64",["gateway"]="https://bloxbot-free-catalog.bloxbot.workers.dev",["loader_url"]="https://raw.githubusercontent.com/sabex999/bloxbot-free/refs/heads/main/loader.lua"} end
 return import("GitHubMain")()
