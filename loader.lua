@@ -170,7 +170,17 @@ local SavedKey=import("SavedKey")
 local config=import("ReleaseConfig")
 return function()
  local env=type(getgenv)=='function'and getgenv()or _G
- for _,name in ipairs({'BloxBotFreeLuau','BloxBotFreeLogin'})do local previous=env[name];if type(previous)=='table'and type(previous.destroy)=='function'then pcall(previous.destroy,true)end end
+ local preparedRuntime
+ for _,name in ipairs({'BloxBotFreeLuau','BloxBotFreeLogin'})do
+  local previous=env[name]
+  if type(previous)=='table'and type(previous.destroy)=='function'then
+   local ok,retained=pcall(previous.destroy,true)
+   if name=='BloxBotFreeLuau' and ok and type(retained)=='table'
+     and retained.release==config.sha256 and type(retained.start)=='function'then
+    preparedRuntime=retained.start
+   end
+  end
+ end
  local player=game:GetService('Players').LocalPlayer;assert(player,'Join a game before running Bloxbot')
  local http=game:GetService('HttpService');local input=game:GetService('UserInputService');local guiService=game:GetService('GuiService')
  local transport=Compat.get();local alive,busy,transferred=true,false,false;local sdk,session,saved,hwid=nil,nil,nil,nil;local connections={}
@@ -206,6 +216,7 @@ return function()
  local public={}
  function public.destroy()
   if not alive then return end;alive=false
+  preparedRuntime=nil
   for _,c in ipairs(connections)do c:Disconnect()end;if cameraConnection then cameraConnection:Disconnect()end
   gui:Destroy();if not transferred then
    if session then session:close()end;if sdk and type(sdk.disconnect)=='function'then pcall(sdk.disconnect)end
@@ -221,12 +232,43 @@ return function()
   local reply=transport.fetch({Url=config.gateway..path,Method='POST',Headers={Accept='application/json',['Content-Type']='application/json',['User-Agent']='Bloxbot/1.0',['Cache-Control']='no-cache'},Body=http:JSONEncode({key=userKey,hwid=hwid,release=config.sha256}),Timeout=20})
   local data=http:JSONDecode(reply.Body);return reply.StatusCode,data,started
  end
- local function runtime()
+ local function runtime(pending)
   local path='BloxBotFreeCache-v1/runtime-'..config.sha256..'.enc64'
   if type(readfile)=='function'then local ok,value=pcall(readfile,path);if ok and type(value)=='string'and #value==config.bytes and transport.hash(value)==config.sha256 then return value end end
-  message('Downloading update…');local value=fetch(config.url)
+  assert(alive and (not pending or not pending.cancelled),'Closed')
+  if not pending then message('Downloading update…')end
+  local value=fetch(config.url)
+  assert(alive and (not pending or not pending.cancelled),'Closed')
   assert(#value==config.bytes and transport.hash(value)==config.sha256,'Update verification failed. Please retry.')
   if type(writefile)=='function'then if type(makefolder)=='function'then pcall(makefolder,'BloxBotFreeCache-v1')end;pcall(writefile,path,value)end
+  return value
+ end
+ local function prefetchRuntime()
+  local pending={}
+  -- This work only handles public ciphertext. The grant still supplies the
+  -- decryption data after the server verifies the key and device.
+  task.defer(function()
+   if not alive or pending.cancelled then return end
+   pending.started=true
+   local ok,value=pcall(runtime,pending)
+   if alive and not pending.cancelled then
+    pending.ok,pending.value,pending.done=ok,value,true
+   end
+  end)
+  return pending
+ end
+ local function finishRuntime(pending)
+  if not pending or not pending.started then
+   if pending then pending.cancelled=true end
+   return runtime()
+  end
+  if not pending.done then message('Preparing update…')end
+  while not pending.done do
+   assert(alive and session.isConnected(),'Panda is reconnecting. Please retry.')
+   task.wait()
+  end
+  if not pending.ok then error(pending.value,0)end
+  local value=pending.value;pending.value=nil
   return value
  end
  connect(copy.Activated,function()
@@ -239,11 +281,14 @@ return function()
   if busy or not sdk then return end;busy=true;enter.Text='Checking…';message(automatic and 'Signing in with your saved key…'or 'Checking Panda key…')
   userKey=userKey:match('^%s*(.-)%s*$')or''
   task.spawn(function()
+   local pending
    local ok,result=pcall(function()
     assert(userKey:match('^PANDA%-%w%w%w%w%-%w%w%w%w%-%w%w%w%w%-%w%w%w%w$'),'Paste your Panda key exactly as shown')
+    if automatic and not preparedRuntime and type(task.defer)=='function'and type(task.wait)=='function'then pending=prefetchRuntime()end
     -- Already-bound keys can use the independent server check immediately.
     -- New keys still pass Panda's SDK handshake to establish their HWID.
     local status,authorization,started=grant('/v1/catalog',userKey)
+    assert(alive,'Closed')
     if status==403 then
      local result=sdk.validate(userKey)
      if type(result)~='table'or result.success~=true then
@@ -251,24 +296,37 @@ return function()
       if reason=='INVALID_KEY'then saved:clear()end
       error(reason=='INVALID_KEY'and'Key expired or bound to another device. Get a key from this menu.'or'Panda is busy. Please retry shortly.',0)
      end
-     status,authorization,started=grant('/v1/catalog',userKey)
+     assert(alive,'Closed');status,authorization,started=grant('/v1/catalog',userKey)
     end
     if status==403 then saved:clear()end
     assert(status==200,status==409 and 'Update available. Run the loader again.'or status==403 and 'Key expired or bound to another device. Get a key from this menu.'or 'Panda connection interrupted. Please retry.')
     assert(type(authorization)=='table'and type(authorization.catalog)=='table'and type(authorization.code)=='table','Panda verification needs a retry')
-    assert(alive,'Closed');session:accept(userKey,authorization,started);saved:write(userKey);userKey='';if alive then key.Text=''end
+    assert(alive,'Closed');session:accept(userKey,authorization,started)
+    if not automatic or resume then saved:write(userKey)end
+    userKey='';if alive then key.Text=''end
     -- Runtime access now uses fresh server leases, not the mobile SDK heartbeat.
     pcall(sdk.disconnect)
-    local encrypted=runtime();local code=transport.decrypt(encrypted,authorization.code.key,authorization.code.iv)
-    assert(type(code)=='string'and #code==config.plain_bytes and transport.hash(code)==config.plain_sha256,'Update decryption failed. Please retry.')
+    local start=preparedRuntime
+    if not start then
+     local encrypted=finishRuntime(pending)
+     assert(alive and session.isConnected()==true,'Panda is reconnecting. Please retry.')
+     local code=transport.decrypt(encrypted,authorization.code.key,authorization.code.iv)
+     assert(type(code)=='string'and #code==config.plain_bytes and transport.hash(code)==config.plain_sha256,'Update decryption failed. Please retry.')
+     assert(alive and session.isConnected()==true,'Panda is reconnecting. Please retry.')
+     local chunk,problem=loadstring(code,'BloxBotFreeRuntime');assert(chunk,problem)
+     start=chunk();assert(type(start)=='function','Update format differs')
+    end
     assert(alive and session.isConnected()==true,'Panda is reconnecting. Please retry.')
-    local chunk,problem=loadstring(code,'BloxBotFreeRuntime');assert(chunk,problem)
-    local start=chunk();assert(type(start)=='function','Update format differs')
     transferred=true;public.destroy()
     local launchOk,menu=pcall(start,{sdk=session,catalog=authorization.catalog,resume=resume})
     if not launchOk then transferred=false;session:close();error(menu,0)end
     local destroy=menu.destroy;local closed=false
-    menu.destroy=function(preserve)if closed then return end;closed=true;destroy(preserve==true);session:close();pcall(sdk.disconnect)end
+    menu.destroy=function(preserve)
+     if closed then return end;closed=true
+     local retainRuntime=preserve==true and not session.isExpired()
+     destroy(preserve==true);session:close();pcall(sdk.disconnect)
+     if retainRuntime then return {release=config.sha256,start=start}end
+    end
     local queue=queue_on_teleport or queue_on_tp or queueonteleport or queueontp
     if type(queue)=='function'and player.OnTeleport then
      local queued=false
@@ -285,6 +343,8 @@ return function()
     end
     return menu
    end)
+   if pending then pending.cancelled=true;pending.value=nil end
+   if not ok then preparedRuntime=nil end
    userKey='';busy=false
    if not alive and not transferred and sdk and type(sdk.disconnect)=='function'then pcall(sdk.disconnect)end
    if alive then enter.Text='Unlock';if not ok then message(tostring(result):gsub('^.-:%d+: ',''))end end
@@ -316,5 +376,5 @@ return function()
 end
 
 end
-factories.ReleaseConfig=function()return {["sha256"]="f166c0cf9c4650926e1711a39f1bc5fb36da33d379f03487ae2f45ff44e45053",["bytes"]=4781440,["plain_bytes"]=3586079,["plain_sha256"]="b436ae54f7721d8c78d6d255ff50fe19384797766e7b95fe6c3f8c1176650892",["url"]="https://raw.githubusercontent.com/sabex999/bloxbot-free/main/releases/r30-f166c0cf9c465092.enc64",["gateway"]="https://bloxbot-free-catalog.bloxbot.workers.dev",["loader_url"]="https://raw.githubusercontent.com/sabex999/bloxbot-free/refs/heads/main/loader.lua"} end
+factories.ReleaseConfig=function()return {["sha256"]="d4c82e74a8af5fa4e7a43560efb52d9105d1014e3607d155ec27b5c2f06cdc7a",["bytes"]=4781440,["plain_bytes"]=3586079,["plain_sha256"]="50ca6ca1dd44584de889adf47dd9bfda57aa14fbfd1f78bbcdea6e78df81e25c",["url"]="https://raw.githubusercontent.com/sabex999/bloxbot-free/main/releases/r31-d4c82e74a8af5fa4.enc64",["gateway"]="https://bloxbot-free-catalog.bloxbot.workers.dev",["loader_url"]="https://raw.githubusercontent.com/sabex999/bloxbot-free/refs/heads/main/loader.lua"} end
 return import("GitHubMain")()
