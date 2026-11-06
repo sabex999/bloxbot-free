@@ -1,10 +1,10 @@
 {
-  "version": "R26",
-  "sha256": "f8c4f6e783658bfaa4a7053844f956de85ed2f2b1c916b6ec57878554e0edc4d",
-  "bytes": 4767212,
-  "plain_bytes": 3575397,
-  "plain_sha256": "b9123c6f49e2b4ffdcd214dcd475fe9090f2ebae67bd18fe5350543c92986542",
-  "url": "https://raw.githubusercontent.com/sabex999/bloxbot-free/main/releases/r26-f8c4f6e783658bfa.enc64",
+  "version": "R27",
+  "sha256": "14313774b4e111ba6852152c37bbbed917eb3e2c1addcbb29db26b8e1b103a9f",
+  "bytes": 4767704,
+  "plain_bytes": 3575769,
+  "plain_sha256": "cfe339cac45ddd7958405efbc30520120146ddc27c051052d213a0936e25b89d",
+  "url": "https://raw.githubusercontent.com/sabex999/bloxbot-free/main/releases/r27-14313774b4e111ba.enc64",
   "gateway": "https://bloxbot-free-catalog.bloxbot.workers.dev",
   "loader_url": "https://raw.githubusercontent.com/sabex999/bloxbot-free/refs/heads/main/loader.lua"
 }
