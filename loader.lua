@@ -54,6 +54,22 @@ function Compat.mobile()
  local ok,input=pcall(function()return game:GetService('UserInputService')end)
  return ok and input.TouchEnabled==true
 end
+function Compat.zstdDecoder()
+ local ok,inflate=pcall(function()
+  local encoding=game:GetService('EncodingService')
+  local algorithm=Enum.CompressionAlgorithm.Zstd
+  local function decode(compressed,size)
+   assert(encoding:GetDecompressedBufferSize(compressed,algorithm)==size,'Zstd decoded size differs')
+   local result=encoding:DecompressBuffer(compressed,algorithm)
+   assert(typeof(result)=='buffer' and buffer.len(result)==size,'Zstd decoded buffer differs')
+   return result
+  end
+  local probe=buffer.fromstring('\040\181\047\253\032\008\065\000\000\000\255ripple')
+  assert(buffer.tostring(decode(probe,8))==string.char(0,255)..'ripple','Zstd capability check differs')
+  return decode
+ end)
+ return ok and inflate or nil
+end
 return Compat
 
 end
@@ -376,5 +392,5 @@ return function()
 end
 
 end
-factories.ReleaseConfig=function()return {["sha256"]="fab0ff1679b5b27720884e4ed90f939b8a0617cb5bc6804860f3819d7a8b5c82",["bytes"]=305752,["plain_bytes"]=229298,["plain_sha256"]="e3d6f7c26d07726563016fd8a3605cd073b809fb50e390cd9149ef76428a89fd",["url"]="https://raw.githubusercontent.com/sabex999/bloxbot-free/main/releases/r39-fab0ff1679b5b277.enc64",["gateway"]="https://bloxbot-free-catalog.bloxbot.workers.dev",["loader_url"]="https://raw.githubusercontent.com/sabex999/bloxbot-free/refs/heads/main/loader.lua"} end
+factories.ReleaseConfig=function()return {["sha256"]="71b88da6f23982286f75a258b2f8f5130af3f9fbda3e216473c4727508d05c60",["bytes"]=308012,["plain_bytes"]=231006,["plain_sha256"]="c6328a0e52e3709c5de9979fb51baebc77d17ac8a43647dcd4a195f0c0e22a3d",["url"]="https://raw.githubusercontent.com/sabex999/bloxbot-free/main/releases/r40-71b88da6f2398228.enc64",["gateway"]="https://bloxbot-free-catalog.bloxbot.workers.dev",["loader_url"]="https://raw.githubusercontent.com/sabex999/bloxbot-free/refs/heads/main/loader.lua"} end
 return import("GitHubMain")()
