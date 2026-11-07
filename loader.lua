@@ -142,7 +142,7 @@ local function b64(raw)
  return table.concat(result)
 end
 local function valid(key)return type(key)=='string'and key:match('^PANDA%-%w%w%w%w%-%w%w%w%w%-%w%w%w%w%-%w%w%w%w$')~=nil end
-local models={['mechanoid']=true,['wolvot-v3']=true,['ripple-v1-0']=true,['ripple-v1-1']=true}
+local models={['mechanoid']=true,['wolvot-v3']=true}
 local function resumeState(value)
  if type(value)~='table'or not models[value.id]or(value.game~='Turbo Soccer'and value.game~='Blox League')or value.autoQueue~=true or type(value.skipReplay)~='boolean'then return nil end
  return {id=value.id,game=value.game,autoQueue=true,skipReplay=value.skipReplay}
@@ -392,5 +392,5 @@ return function()
 end
 
 end
-factories.ReleaseConfig=function()return {["sha256"]="16eea56e662fd28d4784ca1fdd48d6ace0aad9c1d1207f8571fcca435061b676",["bytes"]=318912,["plain_bytes"]=239177,["plain_sha256"]="9cabeed3a93f69866f2c24468090d9a3a1a691cea80c52d8a2cd8e375291de1a",["url"]="https://raw.githubusercontent.com/sabex999/bloxbot-free/main/releases/r42-16eea56e662fd28d.enc64",["gateway"]="https://bloxbot-free-catalog.bloxbot.workers.dev",["loader_url"]="https://raw.githubusercontent.com/sabex999/bloxbot-free/refs/heads/main/loader.lua"} end
+factories.ReleaseConfig=function()return {["sha256"]="405a9182a61369e6b19268e7ef24f92a5650b1568588af1bad6177322ed3f701",["bytes"]=327960,["plain_bytes"]=245966,["plain_sha256"]="3ef416d9f0993785bd4d5b85be53fe574294ae8db89183483e5cc7349f42926f",["url"]="https://raw.githubusercontent.com/sabex999/bloxbot-free/main/releases/r43-405a9182a61369e6.enc64",["gateway"]="https://bloxbot-free-catalog.bloxbot.workers.dev",["loader_url"]="https://raw.githubusercontent.com/sabex999/bloxbot-free/refs/heads/main/loader.lua"} end
 return import("GitHubMain")()
